@@ -4,12 +4,11 @@ import aiohttp
 import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from PIL import Image, ImageDraw, ImageFont
 import subprocess
 import ssl
 import urllib3
 import sys
-import json
+import time
 
 # تعطيل التحقق من SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -21,6 +20,7 @@ class TelegramUploader:
         self.api_hash = os.getenv('TELEGRAM_API_HASH')
         self.session_string = os.getenv('TELEGRAM_SESSION_STRING')
         self.client = None
+        self.last_update_time = 0
         
     async def init_client(self):
         """تهيئة العميل التليجرام"""
@@ -35,17 +35,31 @@ class TelegramUploader:
     async def download_file(self, url, filename):
         """تحميل الملف مع تعطيل SSL verification"""
         try:
-            print(f"📥 جاري تحميل {filename} من {url}")
+            print(f"📥 جاري تحميل {filename}...")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, ssl=False) as response:
                     if response.status == 200:
+                        total_size = int(response.headers.get('content-length', 0))
+                        downloaded_size = 0
+                        
                         with open(filename, 'wb') as f:
-                            total_size = 0
                             async for chunk in response.content.iter_chunked(8192):
                                 f.write(chunk)
-                                total_size += len(chunk)
-                                print(f"📥 تم تحميل {total_size} بايت", end='\r')
-                        print(f"\n✅ تم تحميل {filename} بنجاح")
+                                downloaded_size += len(chunk)
+                                
+                                # تحديث الـ progress كل 10 ثواني فقط
+                                current_time = time.time()
+                                if current_time - self.last_update_time >= 10:
+                                    if total_size > 0:
+                                        percent = (downloaded_size / total_size) * 100
+                                        print(f"📥 التحميل: {percent:.1f}% ({downloaded_size}/{total_size} bytes)")
+                                    else:
+                                        print(f"📥 تم تحميل: {downloaded_size} bytes")
+                                    self.last_update_time = current_time
+                        
+                        # طباعة النتيجة النهائية
+                        print(f"✅ تم تحميل {filename} بنجاح - {downloaded_size} bytes")
                         return True
                     else:
                         print(f"❌ فشل التحميل: {response.status}")
@@ -60,9 +74,9 @@ class TelegramUploader:
             print("🎨 جاري إضافة اللوجو إلى الفيديو...")
             
             if position == 'top-left':
-                overlay = '10:10'  # أعلى اليسار
+                overlay = '10:10'
             elif position == 'top-right':
-                overlay = 'main_w-overlay_w-10:10'  # أعلى اليمين
+                overlay = 'main_w-overlay_w-10:10'
             else:
                 overlay = '10:10'
                 
@@ -72,12 +86,13 @@ class TelegramUploader:
                 '-codec:a', 'copy', output_path, '-y'
             ]
             
+            # تشغيل ffmpeg بدون output مزعج
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 print("✅ تم إضافة اللوجو بنجاح")
                 return True
             else:
-                print(f"❌ خطأ في ffmpeg: {result.stderr}")
+                print(f"❌ خطأ في ffmpeg")
                 return False
                 
         except Exception as e:
@@ -100,16 +115,16 @@ class TelegramUploader:
     async def upload_media_group(self, entity, files, caption):
         """رفع مجموعة وسائط"""
         try:
+            print("📤 جاري رفع الملفات...")
             uploaded_files = []
-            for file_path in files:
-                if file_path.lower().endswith(('.jpg', '.png', '.jpeg')):
-                    uploaded_file = await self.client.upload_file(file_path)
-                    uploaded_files.append(uploaded_file)
-                else:
-                    uploaded_file = await self.client.upload_file(file_path)
-                    uploaded_files.append(uploaded_file)
+            
+            for i, file_path in enumerate(files, 1):
+                print(f"📤 رفع الملف {i}/{len(files)}...")
+                uploaded_file = await self.client.upload_file(file_path)
+                uploaded_files.append(uploaded_file)
             
             await self.client.send_file(entity, uploaded_files, caption=caption)
+            print("✅ تم رفع الملفات بنجاح")
             return True
         except Exception as e:
             print(f"❌ خطأ في رفع المجموعة: {e}")
@@ -118,10 +133,14 @@ class TelegramUploader:
     async def upload_single_post(self, entity, image_path, video_path, caption):
         """رفع بوست واحد بصورة وفيديو"""
         try:
+            print("📤 جاري رفع البوست...")
+            
             # رفع الصورة
+            print("🖼️ رفع الصورة...")
             uploaded_photo = await self.client.upload_file(image_path)
             
             # رفع الفيديو
+            print("🎬 رفع الفيديو...")
             uploaded_video = await self.client.upload_file(video_path)
             
             # إرسال معًا
@@ -130,6 +149,7 @@ class TelegramUploader:
                 [uploaded_photo, uploaded_video],
                 caption=caption
             )
+            print("✅ تم رفع البوست بنجاح")
             return True
         except Exception as e:
             print(f"❌ خطأ في رفع البوست: {e}")
@@ -186,7 +206,6 @@ class TelegramUploader:
             logo_success = await self.download_file(logo_url, logo_filename)
             
             if not logo_success:
-                # إذا فشل تحميل اللوجو، استمر بدون لوجو
                 print("⚠️ فشل تحميل اللوجو، المتابعة بدون لوجو")
                 logo_filename = None
             
@@ -239,19 +258,20 @@ class TelegramUploader:
     
     def cleanup_files(self, files):
         """تنظيف الملفات المؤقتة"""
+        print("🧹 جاري تنظيف الملفات المؤقتة...")
         for file_path in files:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    print(f"🧹 تم تنظيف: {file_path}")
             except:
                 pass
+        print("✅ تم التنظيف")
 
 # دالة رئيسية تعمل مع GitHub Actions
 async def main_github():
     uploader = TelegramUploader()
     
-    # قراءة البيانات من environment variables (التي تأتي من workflow_dispatch)
+    # قراءة البيانات من environment variables
     download_url = os.getenv('INPUT_DOWNLOAD_URL')
     logo_url = os.getenv('INPUT_LOGO_URL')
     channel_username = os.getenv('INPUT_CHANNEL_USERNAME')
@@ -270,8 +290,11 @@ async def main_github():
     print(f"📢 القناة: {channel_username}")
     print(f"🎬 النوع: {content_type}")
     print(f"✏️ إعادة تسمية: {rename_option}")
-    print(f"📝 الاسم الجديد: {new_name}")
-    print(f"🔗 روابط المسلسل: {series_links}")
+    if new_name:
+        print(f"📝 الاسم الجديد: {new_name}")
+    if series_links:
+        print(f"🔗 عدد روابط المسلسل: {len(series_links)}")
+    print("=" * 50)
     
     success = await uploader.process_content(
         download_url=download_url,
@@ -290,59 +313,5 @@ async def main_github():
         print("❌ فشل الرفع!")
         sys.exit(1)
 
-# دالة للاختبار المحلي
-async def main_local():
-    uploader = TelegramUploader()
-    
-    print("🚀 Telegram Uploader Bot")
-    print("=" * 30)
-    
-    # إدخال البيانات (للتشغيل المحلي فقط)
-    download_url = input("🔗 رابط تحميل الفيديو: ")
-    logo_url = input("🖼️ رابط اللوجو: ")
-    channel_username = input("📢 رابط القناة (@username): ")
-    
-    print("\n📝 نوع المحتوى:")
-    print("1 - فيلم 🎬")
-    print("2 - مسلسل 📺")
-    content_choice = input("اختر النوع (1/2): ")
-    
-    content_type = 'movie' if content_choice == '1' else 'series'
-    
-    rename_option = input("🔄 هل تريد إعادة تسمية الملف؟ (y/n): ").lower() == 'y'
-    new_name = None
-    if rename_option:
-        new_name = input("✏️ الاسم الجديد: ")
-    
-    series_links = None
-    if content_type == 'series':
-        print("🔗 إضافة روابط الحلقات (حتى 10 روابط، اكتب 'done' للإنهاء):")
-        series_links = []
-        for i in range(10):
-            link = input(f"رابط الحلقة {i+1}: ")
-            if link.lower() == 'done':
-                break
-            series_links.append(link)
-    
-    success = await uploader.process_content(
-        download_url=download_url,
-        logo_url=logo_url,
-        channel_username=channel_username,
-        content_type=content_type,
-        rename_option=rename_option,
-        new_name=new_name,
-        series_links=series_links
-    )
-    
-    if success:
-        print("✅ تم الرفع بنجاح!")
-    else:
-        print("❌ فشل الرفع!")
-
 if __name__ == "__main__":
-    # إذا كان يعمل في GitHub Actions، استخدم main_github
-    if os.getenv('GITHUB_ACTIONS') == 'true':
-        asyncio.run(main_github())
-    else:
-        # للتشغيل المحلي
-        asyncio.run(main_local())
+    asyncio.run(main_github())
