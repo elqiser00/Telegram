@@ -6,30 +6,36 @@ on:
       download_url:
         description: 'رابط تحميل الفيديو'
         required: true
+        type: string
       logo_url:
         description: 'رابط اللوجو'
         required: true
+        type: string
       channel_username:
         description: 'رابط القناة (@username)'
         required: true
+        type: string
       content_type:
         description: 'نوع المحتوى'
         required: true
-        default: 'movie'
         type: choice
         options:
         - movie
         - series
+        default: 'movie'
       rename_file:
         description: 'إعادة تسمية الملف'
         required: false
-        default: 'false'
+        type: boolean
+        default: false
       new_name:
         description: 'الاسم الجديد'
         required: false
+        type: string
       series_links:
         description: 'روابط الحلقات (مفصولة بفاصلة)'
         required: false
+        type: string
 
 jobs:
   upload:
@@ -56,5 +62,13 @@ jobs:
         TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
         TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+        INPUT_DOWNLOAD_URL: ${{ github.event.inputs.download_url }}
+        INPUT_LOGO_URL: ${{ github.event.inputs.logo_url }}
+        INPUT_CHANNEL_USERNAME: ${{ github.event.inputs.channel_username }}
+        INPUT_CONTENT_TYPE: ${{ github.event.inputs.content_type }}
+        INPUT_RENAME_FILE: ${{ github.event.inputs.rename_file }}
+        INPUT_NEW_NAME: ${{ github.event.inputs.new_name }}
+        INPUT_SERIES_LINKS: ${{ github.event.inputs.series_links }}
+        GITHUB_ACTIONS: 'true'
       run: |
         python telegram_uploader.py
