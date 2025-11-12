@@ -1,0 +1,5 @@
+telethon==1.28.5
+aiohttp==3.8.5
+Pillow==10.0.1
+requests==2.31.0
+urllib3==2.0.7
