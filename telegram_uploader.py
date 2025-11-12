@@ -208,14 +208,70 @@ class TelegramUploader:
         except Exception as e:
             print(f"❌ خطأ في رفع البوست: {e}")
             return False
+
+    async def find_channel_entity(self, channel_input):
+        """البحث عن القناة بطرق مختلفة"""
+        entity = None
+        
+        # المحاولة 1: كرقم مباشر
+        try:
+            print(f"   🔍 المحاولة 1: البحث كرقم...")
+            entity = await self.client.get_entity(int(channel_input))
+            print(f"   ✅ تم العثور على القناة كرقم: {getattr(entity, 'title', 'Unknown')}")
+            return entity
+        except:
+            pass
+        
+        # المحاولة 2: كـ username مع @
+        try:
+            print(f"   🔍 المحاولة 2: البحث كـ username...")
+            if not channel_input.startswith('@'):
+                channel_input = f"@{channel_input}"
+            entity = await self.client.get_entity(channel_input)
+            print(f"   ✅ تم العثور على القناة كـ username: {getattr(entity, 'title', 'Unknown')}")
+            return entity
+        except:
+            pass
+        
+        # المحاولة 3: البحث في الدردشات
+        try:
+            print(f"   🔍 المحاولة 3: البحث في الدردشات...")
+            async for dialog in self.client.iter_dialogs():
+                if hasattr(dialog.entity, 'id'):
+                    # تحقق من الرقم
+                    if str(dialog.entity.id) == channel_input:
+                        print(f"   ✅ تم العثور على القناة في الدردشات: {getattr(dialog.entity, 'title', 'Unknown')}")
+                        return dialog.entity
+                    # تحقق من username
+                    if hasattr(dialog.entity, 'username') and dialog.entity.username:
+                        username_clean = channel_input.replace('@', '').strip()
+                        if dialog.entity.username.lower() == username_clean.lower():
+                            print(f"   ✅ تم العثور على القناة بالاسم: {getattr(dialog.entity, 'title', 'Unknown')}")
+                            return dialog.entity
+        except Exception as e:
+            print(f"   ⚠️ خطأ في البحث في الدردشات: {e}")
+        
+        return None
     
-    async def upload_to_telegram(self, file_paths, channel_username, post_type, title=None, links=None):
+    async def upload_to_telegram(self, file_paths, channel_input, post_type, title=None, links=None):
         """رفع الملفات إلى قناة التليجرام"""
         try:
-            print(f"📤 جاري الرفع إلى القناة: {channel_username}")
+            print(f"📤 جاري الرفع إلى القناة: {channel_input}")
             
-            entity = await self.client.get_entity(channel_username)
-            print(f"   ✅ تم العثور على القناة: {entity.title}")
+            # البحث عن القناة
+            entity = await self.find_channel_entity(channel_input)
+            
+            if not entity:
+                print(f"❌ لا يمكن العثور على القناة: {channel_input}")
+                print("💡 تأكد من:")
+                print("   - الرقم صحيح")
+                print("   - البوت مضاف للقناة")
+                print("   - البوت عنده صلاحية الرفع")
+                print("   - القناة ليست خاصة جداً")
+                return False
+            
+            print(f"   ✅ تم العثور على القناة: {getattr(entity, 'title', 'Unknown')}")
+            print(f"   🔢 رقم القناة: {entity.id}")
             
             if post_type == 'movie':
                 # البحث عن الصورة والفيديو
