@@ -57,6 +57,32 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
         
+    - name: Debug - Check files and permissions
+      run: |
+        echo "=== فحص الملفات ==="
+        pwd
+        ls -la
+        echo "=== فحص ملف البايثون ==="
+        ls -la telegram_uploader.py
+        echo "=== فحص محتوى الملف ==="
+        head -20 telegram_uploader.py
+        echo "=== فحص الـ Python ==="
+        python --version
+        which python
+        
+    - name: Debug - Test simple Python
+      run: |
+        echo "=== اختبار بايثون بسيط ==="
+        python -c "print('✅ Python is working!'); import sys; print(f'Python path: {sys.executable}')"
+        
+    - name: Debug - Check environment
+      run: |
+        echo "=== فحص Environment Variables ==="
+        echo "GITHUB_ACTIONS: $GITHUB_ACTIONS"
+        echo "INPUT_DOWNLOAD_URL: ${{ github.event.inputs.download_url }}"
+        echo "INPUT_LOGO_URL: ${{ github.event.inputs.logo_url }}"
+        echo "INPUT_CHANNEL_USERNAME: ${{ github.event.inputs.channel_username }}"
+        
     - name: Run Telegram Uploader
       env:
         TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -71,4 +97,7 @@ jobs:
         INPUT_SERIES_LINKS: ${{ github.event.inputs.series_links }}
         GITHUB_ACTIONS: 'true'
       run: |
+        echo "=== بدء تشغيل السكريبت ==="
         python telegram_uploader.py
+        EXIT_CODE=$?
+        echo "=== انتهى التشغيل مع كود الخروج: $EXIT_CODE ==="
