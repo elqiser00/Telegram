@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       channel_username:
-        description: 'رقم القناة أو @username'
+        description: 'رابط القناة'
         required: true
         type: string
       content_type:
@@ -33,7 +33,7 @@ on:
         required: false
         type: string
       series_links:
-        description: 'روابط الحلقات (مفصولة بفاصلة)'
+        description: 'روابط الحلقات'
         required: false
         type: string
 
@@ -57,7 +57,24 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg
         
-    - name: Run Telegram Uploader
+    - name: Debug - Check files
+      run: |
+        echo "=== فحص الملفات ==="
+        pwd
+        ls -la
+        echo "=== محتوى الملف الرئيسي (أول 10 أسطر) ==="
+        head -10 telegram_uploader.py
+        
+    - name: Debug - Test Python imports
+      run: |
+        echo "=== اختبار استيراد المكتبات ==="
+        python -c "import telethon; print('✅ telethon works')"
+        python -c "import aiohttp; print('✅ aiohttp works')"
+        python -c "import requests; print('✅ requests works')"
+        python -c "import asyncio; print('✅ asyncio works')"
+        echo "✅ جميع المكتبات شغالة"
+        
+    - name: Run Simple Test
       env:
         TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
         TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
@@ -70,4 +87,22 @@ jobs:
         INPUT_NEW_NAME: ${{ github.event.inputs.new_name }}
         INPUT_SERIES_LINKS: ${{ github.event.inputs.series_links }}
       run: |
-        python telegram_uploader.py
+        echo "=== تشغيل الاختبار البسيط ==="
+        python simple_test.py
+        
+    - name: Run Main Script
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+        INPUT_DOWNLOAD_URL: ${{ github.event.inputs.download_url }}
+        INPUT_LOGO_URL: ${{ github.event.inputs.logo_url }}
+        INPUT_CHANNEL_USERNAME: ${{ github.event.inputs.channel_username }}
+        INPUT_CONTENT_TYPE: ${{ github.event.inputs.content_type }}
+        INPUT_RENAME_FILE: ${{ github.event.inputs.rename_file }}
+        INPUT_NEW_NAME: ${{ github.event.inputs.new_name }}
+        INPUT_SERIES_LINKS: ${{ github.event.inputs.series_links }}
+      run: |
+        echo "=== بدء تشغيل السكريبت الرئيسي ==="
+        timeout 300 python telegram_uploader.py
+        echo "=== انتهى التشغيل ==="
