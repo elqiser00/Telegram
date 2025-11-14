@@ -9,6 +9,7 @@ import ssl
 import urllib3
 import sys
 import time
+import re
 
 # تعطيل التحقق من SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -119,32 +120,110 @@ class TelegramUploader:
     async def find_channel_entity(self, channel_input):
         """البحث عن القناة بطرق مختلفة"""
         try:
-            # المحاولة 1: كرقم مباشر
+            print(f"   🔍 جاري البحث عن القناة: {channel_input}")
+            
+            # تنظيف المدخل من المسافات
+            channel_input = channel_input.strip()
+            
+            # المحاولة 1: إذا كان رابط دعوة (يبدأ بـ +)
+            if '+_' in channel_input or channel_input.startswith('https://t.me/+') or channel_input.startswith('t.me/+'):
+                print(f"   🔍 المحاولة 1: التعامل مع رابط الدعوة")
+                try:
+                    # استخراج الـ hash من رابط الدعوة
+                    if 't.me/+' in channel_input:
+                        invite_hash = channel_input.split('t.me/+')[-1]
+                    elif '+_' in channel_input:
+                        invite_hash = channel_input
+                    else:
+                        invite_hash = channel_input.replace('https://t.me/', '')
+                    
+                    # تنظيف الـ hash
+                    invite_hash = invite_hash.strip().replace('+', '')
+                    
+                    print(f"   🔑 محاولة الانضمام برابط الدعوة: {invite_hash}")
+                    
+                    # الانضمام للقناة عبر رابط الدعوة
+                    result = await self.client.import_chat_invite(invite_hash)
+                    if result and hasattr(result, 'chats') and result.chats:
+                        entity = await self.client.get_entity(result.chats[0].id)
+                        print(f"   ✅ تم الانضمام للقناة عبر رابط الدعوة: {getattr(entity, 'title', 'Unknown')}")
+                        return entity
+                except Exception as e:
+                    print(f"   ⚠️ فشل الانضمام عبر رابط الدعوة: {e}")
+            
+            # المحاولة 2: استخراج الرقم من الرابط
             try:
-                entity = await self.client.get_entity(int(channel_input))
-                print(f"✅ تم العثور على القناة كرقم")
-                return entity
-            except:
-                pass
+                print(f"   🔍 المحاولة 2: استخراج الرقم من الرابط")
+                # البحث عن أرقام في النص
+                numbers = re.findall(r'-?\d+', channel_input)
+                if numbers:
+                    for number in numbers:
+                        # تجاهل الأرقام الصغيرة (مثل أرقام الرسائل)
+                        if len(str(abs(int(number)))) > 8:
+                            try:
+                                entity = await self.client.get_entity(int(number))
+                                print(f"   ✅ تم العثور على القناة بالرقم: {number}")
+                                return entity
+                            except:
+                                continue
+            except Exception as e:
+                print(f"   ⚠️ فشل استخراج الرقم: {e}")
             
-            # المحاولة 2: كـ username
+            # المحاولة 3: كـ username
             try:
-                if not channel_input.startswith('@'):
-                    channel_input = f"@{channel_input}"
-                entity = await self.client.get_entity(channel_input)
-                print(f"✅ تم العثور على القناة كـ username")
-                return entity
-            except:
-                pass
+                print(f"   🔍 المحاولة 3: البحث كـ username")
+                username = channel_input
+                
+                # تنظيف الـ username من الروابط
+                if 'https://t.me/' in username:
+                    username = username.split('https://t.me/')[-1]
+                elif 't.me/' in username:
+                    username = username.split('t.me/')[-1]
+                
+                # إزالة الـ + إذا موجود
+                username = username.replace('+', '')
+                
+                # إزالة أي parameters إضافية
+                username = username.split('?')[0].split('/')[0]
+                
+                if username and not username.startswith('@'):
+                    username = f"@{username}"
+                
+                if username and username != '@':
+                    entity = await self.client.get_entity(username)
+                    print(f"   ✅ تم العثور على القناة كـ username: {username}")
+                    return entity
+            except Exception as e:
+                print(f"   ⚠️ فشل البحث كـ username: {e}")
             
-            # المحاولة 3: البحث في الدردشات
-            async for dialog in self.client.iter_dialogs():
-                if hasattr(dialog.entity, 'id'):
-                    if str(dialog.entity.id) == channel_input:
-                        print(f"✅ تم العثور على القناة في الدردشات")
-                        return dialog.entity
+            # المحاولة 4: البحث في الدردشات
+            try:
+                print(f"   🔍 المحاولة 4: البحث في الدردشات")
+                async for dialog in self.client.iter_dialogs():
+                    if hasattr(dialog.entity, 'id'):
+                        # تحقق من الرقم
+                        if str(dialog.entity.id) in channel_input:
+                            print(f"   ✅ تم العثور على القناة في الدردشات بالرقم")
+                            return dialog.entity
+                        
+                        # تحقق من username
+                        if hasattr(dialog.entity, 'username') and dialog.entity.username:
+                            username_clean = channel_input.replace('@', '').replace('https://t.me/', '').replace('t.me/', '').split('?')[0].replace('+', '')
+                            if dialog.entity.username.lower() == username_clean.lower():
+                                print(f"   ✅ تم العثور على القناة في الدردشات بالاسم")
+                                return dialog.entity
+                        
+                        # تحقق من العنوان
+                        if hasattr(dialog.entity, 'title'):
+                            if dialog.entity.title.lower() in channel_input.lower():
+                                print(f"   ✅ تم العثور على القناة في الدردشات بالعنوان")
+                                return dialog.entity
+            except Exception as e:
+                print(f"   ⚠️ فشل البحث في الدردشات: {e}")
             
+            print(f"   ❌ لم يتم العثور على القناة بأي طريقة")
             return None
+            
         except Exception as e:
             print(f"❌ خطأ في البحث عن القناة: {e}")
             return None
@@ -159,9 +238,15 @@ class TelegramUploader:
             
             if not entity:
                 print(f"❌ لا يمكن العثور على القناة: {channel_input}")
+                print("💡 تأكد من:")
+                print("   - رابط الدعوة صحيح")
+                print("   - البوت مضاف للقناة")
+                print("   - البوت عنده صلاحية الرفع")
+                print("   - حاول استخدام رقم القناة مباشرة (مثل: -1001548535280)")
                 return False
             
-            print(f"✅ تم العثور على القناة: {getattr(entity, 'title', 'Unknown')}")
+            print(f"   ✅ تم العثور على القناة: {getattr(entity, 'title', 'Unknown')}")
+            print(f"   🔢 رقم القناة: {entity.id}")
             
             if post_type == 'movie':
                 # البحث عن الصورة والفيديو
@@ -172,8 +257,11 @@ class TelegramUploader:
                     caption = f"🎬 **{title}**\n\n" if title else "🎬 **فيلم جديد**\n\n"
                     
                     # رفع الصورة
+                    print("   🖼️ رفع الصورة...")
                     uploaded_photo = await self.client.upload_file(image_files[0])
+                    
                     # رفع الفيديو
+                    print("   🎬 رفع الفيديو...")
                     uploaded_video = await self.client.upload_file(video_files[0])
                     
                     # إرسال معًا
@@ -184,6 +272,9 @@ class TelegramUploader:
                     )
                     print("✅ تم رفع البوست بنجاح")
                     return True
+                else:
+                    print("❌ لا توجد صور أو فيديوهات كافية للفيلم")
+                    return False
             
             elif post_type == 'series':
                 caption = f"📺 **{title}**\n\n" if title else "📺 **مسلسل جديد**\n\n"
@@ -196,6 +287,7 @@ class TelegramUploader:
                 # رفع الملفات
                 uploaded_files = []
                 for file_path in file_paths:
+                    print(f"   📤 رفع: {os.path.basename(file_path)}")
                     uploaded_file = await self.client.upload_file(file_path)
                     uploaded_files.append(uploaded_file)
                 
@@ -241,7 +333,7 @@ class TelegramUploader:
             
             # إضافة اللوجو إلى الفيديو
             output_filename = "final_video.mp4"
-            if logo_filename:
+            if logo_filename and os.path.exists(logo_filename):
                 logo_success = self.add_logo_to_video(final_video_path, logo_filename, output_filename)
                 if logo_success:
                     final_video_path = output_filename
@@ -250,7 +342,7 @@ class TelegramUploader:
             files_to_upload = []
             
             if content_type == 'movie':
-                if logo_filename:
+                if logo_filename and os.path.exists(logo_filename):
                     files_to_upload.append(logo_filename)
                 files_to_upload.append(final_video_path)
             else:
@@ -276,12 +368,16 @@ class TelegramUploader:
     
     def cleanup_files(self, files):
         """تنظيف الملفات المؤقتة"""
+        print("🧹 جاري تنظيف الملفات المؤقتة...")
+        cleaned = 0
         for file_path in files:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
+                    cleaned += 1
             except:
                 pass
+        print(f"✅ تم تنظيف {cleaned} ملف")
 
 # دالة رئيسية
 async def main():
