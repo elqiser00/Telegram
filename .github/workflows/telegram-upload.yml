@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Create simple uploader
+      - name: Create Simple Uploader Script
         run: |
           cat > simple_uploader.py << 'EOF'
           #!/usr/bin/env python3
@@ -67,6 +67,7 @@ jobs:
           from telethon import TelegramClient
           from telethon.sessions import StringSession
           import subprocess
+          import re
 
           print("🚀 SIMPLE UPLOADER STARTED")
 
@@ -101,29 +102,64 @@ jobs:
                   me = await client.get_me()
                   print(f"✅ Connected as: {me.first_name}")
                   
-                  # 2. البحث عن القناة
+                  # 2. البحث عن القناة بطرق متعددة
                   print("🔍 STEP 2: Finding channel...")
                   entity = None
-                  try:
-                      # حاول كرقم
-                      numbers = [s for s in channel_username.split() if s.startswith('-100')]
-                      if numbers:
-                          entity = await client.get_entity(int(numbers[0]))
-                  except:
+                  
+                  # المحاولة 1: رابط الدعوة
+                  if 't.me/+' in channel_username:
                       try:
-                          # حاول في الدردشات
-                          async for dialog in client.iter_dialogs(limit=10):
-                              if hasattr(dialog.entity, 'id') and str(dialog.entity.id) in channel_username:
-                                  entity = dialog.entity
+                          print("   🔑 Trying invite link...")
+                          invite_hash = channel_username.split('t.me/+')[-1]
+                          result = await client.import_chat_invite(invite_hash)
+                          if result and hasattr(result, 'chats') and result.chats:
+                              entity = await client.get_entity(result.chats[0].id)
+                              print(f"✅ Channel found via invite: {getattr(entity, 'title', 'Unknown')}")
+                      except Exception as e:
+                          print(f"   ⚠️ Invite failed: {e}")
+                  
+                  # المحاولة 2: البحث في الدردشات
+                  if not entity:
+                      try:
+                          print("   🔎 Searching in dialogs...")
+                          async for dialog in client.iter_dialogs(limit=20):
+                              if hasattr(dialog.entity, 'id'):
+                                  # تحقق من وجود القناة في الدردشات
+                                  print(f"   💬 Checking: {dialog.name} (ID: {dialog.id})")
+                                  if str(dialog.id) in ['-1001548535280', '-1001577518279']:  # القنوات المعروفة
+                                      entity = dialog.entity
+                                      print(f"✅ Known channel found: {dialog.name}")
+                                      break
+                      except Exception as e:
+                          print(f"   ⚠️ Dialog search failed: {e}")
+                  
+                  # المحاولة 3: استخدام معرف قناة مباشر
+                  if not entity:
+                      try:
+                          print("   🔢 Trying direct channel ID...")
+                          # جرب القنوات المعروفة
+                          known_channels = [-1001548535280, -1001577518279]
+                          for channel_id in known_channels:
+                              try:
+                                  entity = await client.get_entity(channel_id)
+                                  print(f"✅ Direct channel found: {getattr(entity, 'title', 'Unknown')}")
                                   break
-                      except:
-                          pass
+                              except:
+                                  continue
+                      except Exception as e:
+                          print(f"   ⚠️ Direct ID failed: {e}")
                   
                   if not entity:
-                      print("❌ Channel not found")
+                      print("❌ Channel not found - Available channels:")
+                      try:
+                          async for dialog in client.iter_dialogs(limit=10):
+                              if hasattr(dialog.entity, 'broadcast') and dialog.entity.broadcast:
+                                  print(f"   📢 {dialog.name} (ID: {dialog.id})")
+                      except:
+                          pass
                       return False
                   
-                  print(f"✅ Channel found: {getattr(entity, 'title', 'Unknown')}")
+                  print(f"✅ Target channel: {getattr(entity, 'title', 'Unknown')}")
                   
                   # 3. تحميل الفيديو
                   print("📥 STEP 3: Downloading video...")
@@ -166,7 +202,6 @@ jobs:
                   
                   if result.returncode != 0:
                       print("❌ Logo addition failed")
-                      # استخدم الفيديو الأصلي
                       final_video = "video.mp4"
                   else:
                       print("✅ Logo added successfully")
@@ -177,14 +212,17 @@ jobs:
                   caption = f"🎬 **{new_name}**\n\n" if new_name else "🎬 **فيلم جديد**\n\n"
                   
                   # رفع الصورة
+                  print("   🖼️ Uploading image...")
                   with open("logo.png", "rb") as f:
                       uploaded_photo = await client.upload_file(f)
                   
                   # رفع الفيديو  
+                  print("   🎬 Uploading video...")
                   with open(final_video, "rb") as f:
                       uploaded_video = await client.upload_file(f)
                   
                   # إرسال البوست
+                  print("   📝 Sending post...")
                   await client.send_file(entity, [uploaded_photo, uploaded_video], caption=caption)
                   
                   print("✅ UPLOAD COMPLETED SUCCESSFULLY!")
