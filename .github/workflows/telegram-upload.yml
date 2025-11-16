@@ -1,4 +1,7 @@
-    - name: Run Simple Debug
+        - name: Install specific telethon version
+      run: |
+        pip uninstall telethon -y
+        pip install telethon==1.28.5
       env:
         TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
         TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
