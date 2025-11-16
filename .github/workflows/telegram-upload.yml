@@ -1,7 +1,147 @@
-        - name: Install specific telethon version
+name: Telegram Uploader
+
+on:
+  workflow_dispatch:
+    inputs:
+      download_url:
+        description: 'رابط تحميل الفيديو'
+        required: true
+        type: string
+      logo_url:
+        description: 'رابط اللوجو'
+        required: true
+        type: string
+      channel_username:
+        description: 'رابط القناة'
+        required: true
+        type: string
+      content_type:
+        description: 'نوع المحتوى'
+        required: true
+        type: choice
+        options:
+          - movie
+          - series
+        default: 'movie'
+      rename_file:
+        description: 'إعادة تسمية الملف'
+        required: false
+        type: boolean
+        default: false
+      new_name:
+        description: 'الاسم الجديد'
+        required: false
+        type: string
+      series_links:
+        description: 'روابط الحلقات'
+        required: false
+        type: string
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
       run: |
-        pip uninstall telethon -y
-        pip install telethon==1.28.5
+        python -m pip install --upgrade pip
+        pip install telethon==1.28.5 aiohttp requests
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        
+    - name: Create simple debug script
+      run: |
+        cat > simple_debug.py << 'EOF'
+        #!/usr/bin/env python3
+        import os
+        import sys
+        import asyncio
+
+        print("🚀 SIMPLE DEBUG STARTED!")
+        print("=" * 50)
+
+        async def test_telegram():
+            print("🔧 Testing Telegram connection...")
+            
+            try:
+                from telethon import TelegramClient
+                from telethon.sessions import StringSession
+                
+                print("✅ Telethon imported successfully")
+                
+                api_id = os.getenv('TELEGRAM_API_ID')
+                api_hash = os.getenv('TELEGRAM_API_HASH')
+                session_string = os.getenv('TELEGRAM_SESSION_STRING')
+                
+                print(f"📋 Credentials check:")
+                print(f"   API_ID: {api_id}")
+                print(f"   API_HASH: {'*' * 8 if api_hash else 'NOT SET'}")
+                print(f"   SESSION: {'*' * 8 if session_string else 'NOT SET'}")
+                
+                if not all([api_id, api_hash, session_string]):
+                    print("❌ Missing credentials")
+                    return False
+                
+                print("🔌 Creating Telegram client...")
+                client = TelegramClient(
+                    StringSession(session_string),
+                    int(api_id),
+                    api_hash
+                )
+                
+                print("📞 Starting client...")
+                await client.start()
+                print("✅ Client started successfully!")
+                
+                me = await client.get_me()
+                print(f"✅ Logged in as: {me.first_name}")
+                
+                print("📋 Getting dialogs...")
+                count = 0
+                async for dialog in client.iter_dialogs(limit=5):
+                    print(f"   💬 {dialog.name} (ID: {dialog.id})")
+                    count += 1
+                
+                print(f"✅ Found {count} dialogs")
+                
+                await client.disconnect()
+                print("✅ Disconnected successfully")
+                return True
+                
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+
+        async def main():
+            print("🎯 MAIN STARTED")
+            success = await test_telegram()
+            print("🎯 MAIN COMPLETED")
+            return success
+
+        if __name__ == "__main__":
+            print("⭐ SCRIPT STARTING")
+            try:
+                success = asyncio.run(main())
+                print(f"⭐ SCRIPT COMPLETED: {'SUCCESS' if success else 'FAILED'}")
+                sys.exit(0 if success else 1)
+            except Exception as e:
+                print(f"💥 SCRIPT CRASHED: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(1)
+        EOF
+        
+    - name: Run Simple Debug
       env:
         TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
         TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
@@ -9,3 +149,20 @@
       run: |
         echo "=== تشغيل الاختبار المبسط ==="
         python simple_debug.py
+        
+    - name: Run Main Script
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+        INPUT_DOWNLOAD_URL: ${{ github.event.inputs.download_url }}
+        INPUT_LOGO_URL: ${{ github.event.inputs.logo_url }}
+        INPUT_CHANNEL_USERNAME: ${{ github.event.inputs.channel_username }}
+        INPUT_CONTENT_TYPE: ${{ github.event.inputs.content_type }}
+        INPUT_RENAME_FILE: ${{ github.event.inputs.rename_file }}
+        INPUT_NEW_NAME: ${{ github.event.inputs.new_name }}
+        INPUT_SERIES_LINKS: ${{ github.event.inputs.series_links }}
+      run: |
+        echo "=== تشغيل السكريبت الرئيسي ==="
+        timeout 600 python telegram_uploader.py || echo "⚠️ Timeout occurred"
+        echo "=== انتهى التشغيل ==="
