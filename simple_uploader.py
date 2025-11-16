@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+import os
+import sys
+import asyncio
+import aiohttp
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+import subprocess
+import re
+
+print("🚀 SIMPLE UPLOADER STARTED")
+
+async def main():
+    print("🎯 MAIN FUNCTION STARTED")
+    
+    # قراءة البيانات
+    download_url = os.getenv('INPUT_DOWNLOAD_URL')
+    logo_url = os.getenv('INPUT_LOGO_URL') 
+    channel_username = os.getenv('INPUT_CHANNEL_USERNAME')
+    content_type = os.getenv('INPUT_CONTENT_TYPE', 'movie')
+    rename_option = os.getenv('INPUT_RENAME_FILE', 'false').lower() == 'true'
+    new_name = os.getenv('INPUT_NEW_NAME', '')
+    
+    print("📋 INPUTS:")
+    print(f"   VIDEO: {download_url}")
+    print(f"   LOGO: {logo_url}")
+    print(f"   CHANNEL: {channel_username}")
+    print(f"   TYPE: {content_type}")
+    print(f"   RENAME: {rename_option}")
+    print(f"   NEW NAME: {new_name}")
+    
+    try:
+        # 1. الاتصال بتليجرام
+        print("🔌 STEP 1: Connecting to Telegram...")
+        client = TelegramClient(
+            StringSession(os.getenv('TELEGRAM_SESSION_STRING')),
+            int(os.getenv('TELEGRAM_API_ID')),
+            os.getenv('TELEGRAM_API_HASH')
+        )
+        await client.start()
+        me = await client.get_me()
+        print(f"✅ Connected as: {me.first_name}")
+        
+        # 2. البحث عن القناة بطرق متعددة
+        print("🔍 STEP 2: Finding channel...")
+        entity = None
+        
+        # المحاولة 1: رابط الدعوة
+        if 't.me/+' in channel_username:
+            try:
+                print("   🔑 Trying invite link...")
+                invite_hash = channel_username.split('t.me/+')[-1]
+                result = await client.import_chat_invite(invite_hash)
+                if result and hasattr(result, 'chats') and result.chats:
+                    entity = await client.get_entity(result.chats[0].id)
+                    print(f"✅ Channel found via invite: {getattr(entity, 'title', 'Unknown')}")
+            except Exception as e:
+                print(f"   ⚠️ Invite failed: {e}")
+        
+        # المحاولة 2: البحث في الدردشات
+        if not entity:
+            try:
+                print("   🔎 Searching in dialogs...")
+                async for dialog in client.iter_dialogs(limit=20):
+                    if hasattr(dialog.entity, 'id'):
+                        # تحقق من وجود القناة في الدردشات
+                        print(f"   💬 Checking: {dialog.name} (ID: {dialog.id})")
+                        if str(dialog.id) in ['-1001548535280', '-1001577518279']:  # القنوات المعروفة
+                            entity = dialog.entity
+                            print(f"✅ Known channel found: {dialog.name}")
+                            break
+            except Exception as e:
+                print(f"   ⚠️ Dialog search failed: {e}")
+        
+        # المحاولة 3: استخدام معرف قناة مباشر
+        if not entity:
+            try:
+                print("   🔢 Trying direct channel ID...")
+                # جرب القنوات المعروفة
+                known_channels = [-1001548535280, -1001577518279]
+                for channel_id in known_channels:
+                    try:
+                        entity = await client.get_entity(channel_id)
+                        print(f"✅ Direct channel found: {getattr(entity, 'title', 'Unknown')}")
+                        break
+                    except:
+                        continue
+            except Exception as e:
+                print(f"   ⚠️ Direct ID failed: {e}")
+        
+        if not entity:
+            print("❌ Channel not found - Available channels:")
+            try:
+                async for dialog in client.iter_dialogs(limit=10):
+                    if hasattr(dialog.entity, 'broadcast') and dialog.entity.broadcast:
+                        print(f"   📢 {dialog.name} (ID: {dialog.id})")
+            except:
+                pass
+            return False
+        
+        print(f"✅ Target channel: {getattr(entity, 'title', 'Unknown')}")
+        
+        # 3. تحميل الفيديو
+        print("📥 STEP 3: Downloading video...")
+        video_content = None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url, ssl=False) as response:
+                if response.status == 200:
+                    video_content = await response.read()
+                    print(f"✅ Video downloaded: {len(video_content)} bytes")
+                else:
+                    print(f"❌ Video download failed: {response.status}")
+                    return False
+        
+        # 4. تحميل اللوجو
+        print("📥 STEP 4: Downloading logo...")
+        logo_content = None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(logo_url, ssl=False) as response:
+                if response.status == 200:
+                    logo_content = await response.read()
+                    print(f"✅ Logo downloaded: {len(logo_content)} bytes")
+                else:
+                    print(f"❌ Logo download failed: {response.status}")
+                    return False
+        
+        # 5. حفظ الملفات مؤقتاً
+        print("💾 STEP 5: Saving files...")
+        with open("video.mp4", "wb") as f:
+            f.write(video_content)
+        with open("logo.png", "wb") as f:
+            f.write(logo_content)
+        
+        # 6. إضافة اللوجو
+        print("🎨 STEP 6: Adding logo...")
+        result = subprocess.run([
+            'ffmpeg', '-i', 'video.mp4', '-i', 'logo.png',
+            '-filter_complex', '[1]scale=150:150[logo];[0][logo]overlay=10:10',
+            '-c:a', 'copy', 'final_video.mp4', '-y'
+        ], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print("❌ Logo addition failed")
+            final_video = "video.mp4"
+        else:
+            print("✅ Logo added successfully")
+            final_video = "final_video.mp4"
+        
+        # 7. الرفع
+        print("📤 STEP 7: Uploading...")
+        caption = f"🎬 **{new_name}**\n\n" if new_name else "🎬 **فيلم جديد**\n\n"
+        
+        # رفع الصورة
+        print("   🖼️ Uploading image...")
+        with open("logo.png", "rb") as f:
+            uploaded_photo = await client.upload_file(f)
+        
+        # رفع الفيديو  
+        print("   🎬 Uploading video...")
+        with open(final_video, "rb") as f:
+            uploaded_video = await client.upload_file(f)
+        
+        # إرسال البوست
+        print("   📝 Sending post...")
+        await client.send_file(entity, [uploaded_photo, uploaded_video], caption=caption)
+        
+        print("✅ UPLOAD COMPLETED SUCCESSFULLY!")
+        
+        # تنظيف
+        for file in ["video.mp4", "logo.png", "final_video.mp4"]:
+            try:
+                os.remove(file)
+            except:
+                pass
+                
+        await client.disconnect()
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    print("⭐ SCRIPT STARTING")
+    try:
+        success = asyncio.run(main())
+        print(f"⭐ SCRIPT COMPLETED: {'SUCCESS' if success else 'FAILED'}")
+        sys.exit(0 if success else 1)
+    except Exception as e:
+        print(f"💥 SCRIPT CRASHED: {e}")
+        sys.exit(1)
